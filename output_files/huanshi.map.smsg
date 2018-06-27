@@ -1,0 +1,1 @@
+Warning (10268): Verilog HDL information at reg_config.v(60): always construct contains both blocking and non-blocking assignments File: C:/Users/Administrator/Desktop/huashi/camera/reg_config.v Line: 60

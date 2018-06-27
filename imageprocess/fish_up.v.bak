@@ -1,0 +1,556 @@
+`timescale 1ns / 1ps
+
+module fish_up
+(
+input clk,
+input rstn,
+
+input signed [10:0]x_cnt_comb,
+input signed [10:0]y_cnt_comb,
+
+output wire [16:0] addr_rd_select
+
+
+    );  
+    parameter H_VBI = 11'd0;
+    parameter V_VBI = 11'd0;
+
+ `define H_ACTIVE		640
+`define H_FRONT_PORCH	16
+`define H_SYNCH			96
+`define H_BACK_PORCH	48
+`define H_TOTAL			( `H_SYNCH + `H_BACK_PORCH + `H_ACTIVE + `H_FRONT_PORCH ) 
+//640 // pixels
+`define V_ACTIVE		480	
+`define V_FRONT_PORCH  11
+`define V_SYNCH			2
+`define V_BACK_PORCH	31	
+`define V_TOTAL			 (`V_SYNCH + `V_BACK_PORCH +  `V_ACTIVE +`V_FRONT_PORCH )
+parameter signed  VGA_LENGTH = 11'd640 ;
+parameter signed  VGA_HEIGHT = 11'd480 ; 	
+
+parameter signed  VGA_LENGTH_HALF = 12'd641 ;	
+parameter signed  VGA_HEIGHE_HALF = 12'd435 ;
+parameter FISH_COEFF_W = 11'd1033 ;
+parameter FISH_COEFF1  = 11'd150  ;
+ parameter  signed ROT_A = 20'd44664 ;
+ parameter  signed ROT_B = 20'd46245 ;
+ parameter  signed ROT_D = 20'd4040   ;
+ parameter  signed ROT_E = 20'd79016 ;
+ parameter  signed ROT_G = 20'd15     ;
+ parameter  signed ROT_H = 20'd154  ;
+ parameter  signed ROT_C = -12'd458   ;
+ parameter  signed ROT_F = -12'd334  ;
+//-----------------------------------------
+    reg h_en  ;
+always@(posedge clk)
+    if (y_cnt_comb == (40) ) h_en<=1;
+    else if (y_cnt_comb==(`H_ACTIVE+40)) h_en<=0;
+    
+    reg v_en ;
+    always@(posedge clk)
+        if (y_cnt_comb == (`H_TOTAL-1) )begin
+
+            if (x_cnt_comb==(`V_TOTAL-1))v_en<=1;
+            else if (x_cnt_comb==(`V_ACTIVE-1))v_en<=0;
+
+        end
+
+   reg  dp_en ;
+    always@(posedge clk) dp_en <= v_en & h_en ;
+
+	
+    reg h_synch ;
+    reg v_synch;
+    always@(posedge clk)
+        if ( y_cnt_comb ==(`H_ACTIVE+`H_FRONT_PORCH+40))
+            h_synch<=0;
+        else if ( y_cnt_comb ==(`H_ACTIVE+`H_FRONT_PORCH+`H_SYNCH+40))
+            h_synch<=1;
+
+    always@(posedge clk)
+        if ( y_cnt_comb ==(`H_TOTAL-1))
+        begin
+            if (x_cnt_comb==(`V_ACTIVE+`V_FRONT_PORCH-1))
+                v_synch<=0;
+            else if ( x_cnt_comb ==(`V_ACTIVE+`V_FRONT_PORCH + `V_SYNCH-1))
+                v_synch<=1;
+        end	
+		
+//------------------------------------------------------------------------------//	
+//   algorithm homo
+	wire signed [10:0] pixel_count1 ;
+    wire signed [10:0] line_count1  ; 	
+	assign  pixel_count1 = x_cnt_comb -H_VBI ;
+	assign  line_count1 = y_cnt_comb - V_VBI ;
+     
+ 
+ reg signed [30:0] coeff1a ;
+     reg signed [30:0] coeff2a ;
+     reg signed [30:0] coeff3a ;    
+     reg signed [30:0] coeff4a ;    
+        always@(posedge clk)   // 2^14             1 clks
+        //    if ( dp_en )
+            begin
+                coeff1a <= ROT_G * pixel_count1 ;
+                coeff2a <= ROT_H * line_count1 ;
+                coeff3a <= ROT_H * pixel_count1 ;
+                coeff4a <= ROT_G * line_count1 ;
+            end
+            
+     wire signed [30:0] coeffab ;
+     wire signed [30:0] coeffeb ;
+     wire signed [30:0] coeffbb ;    
+     wire signed [30:0] coeffdb ;    
+          assign coeffab = { {11{ROT_A[19]}} , ROT_A } ;
+          assign coeffeb = { {11{ROT_E[19]}} , ROT_E } ;
+          assign coeffbb = { {11{ROT_B[19]}} , ROT_B } ;
+          assign coeffdb = { {11{ROT_D[19]}} , ROT_D } ;
+     
+     reg signed [30:0] coeff1 ;
+     reg signed [30:0] coeff2 ;
+     reg signed [30:0] coeff3 ;    
+     reg signed [30:0] coeff4 ;    
+        always@(posedge clk)    //2^14             2 clks
+    //        if ( dp_en )
+            begin
+               coeff1 <= coeffab - coeff1a ;
+               coeff2 <= coeffeb - coeff2a ;
+               coeff3 <= coeffbb - coeff3a ;
+               coeff4 <= coeffdb - coeff4a ;
+            end    
+        
+     wire signed [20:0] coeff11 ;
+     wire signed [20:0] coeff21 ;
+     wire signed [20:0] coeff31 ;
+     wire signed [20:0] coeff41 ;
+         assign  coeff11 = coeff1[20:0] ;
+         assign  coeff21 = coeff2[20:0] ;
+         assign  coeff31 = coeff3[20:0] ;
+         assign     coeff41 = coeff4[20:0] ;
+    
+     reg signed [41:0] divider0a ;
+     reg signed [41:0] divider0b ;
+        always@(posedge clk)   //2^28             3 clks
+    //        if ( dp_en )
+            begin
+                divider0a <=  coeff11 * coeff21;
+                divider0b <=  coeff31 * coeff41;
+            end    
+            
+     reg signed [41:0] divider0 ;
+        always@(posedge clk)   //2^28             4 clks
+    //        if ( dp_en )
+            begin
+               divider0  <=  divider0a - divider0b ;
+            end    
+                    
+     wire signed [15:0]  divisor    ;
+     wire signed [31:0]  dividend   ;
+     //wire signed [47:0]  dout_tdata ;
+     wire signed [31:0]  quotient   ;
+	 wire signed [15:0]  remain;
+        // assign  quotient = dout_tdata[47 : 16] ;   // 2^19            40clks
+        // assign  divisor  = divider0[32 : 17];      // 2^11
+        // assign  dividend = {1'b0,1'b1,30'd0 };     // 2^30
+        //assign  quotient = dout_tdata[47 : 16] ;   // 2^19            40clks
+        assign  divisor  = divider0[33 : 18];      // 2^10
+        assign  dividend = {2'b0,1'b1,29'd0 };     // 2^29
+         /* div_homo  div_homo1 (                     // 36clks
+            .aclk(clk),                                      // input wire aclk
+            .s_axis_divisor_tvalid(1'b1),    // input wire s_axis_divisor_tvalid
+            .s_axis_divisor_tdata(divisor),      // input wire [15 : 0] s_axis_divisor_tdata
+            .s_axis_dividend_tvalid(1'b1),  // input wire s_axis_dividend_tvalid
+            .s_axis_dividend_tdata(dividend),    // input wire [31 : 0] s_axis_dividend_tdata
+           // .m_axis_dout_tvalid(m_axis_dout_tvalid),          // output wire m_axis_dout_tvalid
+            .m_axis_dout_tdata(dout_tdata)            // output wire [47 : 0] m_axis_dout_tdata
+          );  */
+	 div_sign	lpm_div_inst (
+		.clock (clk),
+		.denom (  divisor ),//fenmu
+		.numer ( dividend ),//fenzi
+		.quotient ( quotient ),
+		.remain ( remain )
+		);
+              
+     reg  signed [11:0] x0 ,x0_1 ;
+     reg  signed [11:0] x1 ,x1_1 ;    
+        always@(posedge clk)               //2^0     1clk
+    //        if ( dp_en )
+            begin
+                x0_1 <= pixel_count1 - ROT_C ;
+                x1_1 <= line_count1  - ROT_F ;
+            end    
+        // delay for one clocks        
+          always@(posedge clk)              //2^0      2clk
+    //        if ( dp_en )
+            begin  
+                x0 <= x0_1 ;
+                x1 <= x1_1 ;
+            end
+        
+     reg  signed [34:0] coe2x0 ;
+     reg  signed [34:0] coe3x1 ;
+     reg  signed [34:0] coe4x0 ;
+     reg  signed [34:0] coe1x1 ;    
+        always@(posedge clk)              // 2^14     3clk
+    //        if ( dp_en )
+            begin
+                coe2x0 <= coeff21* x0 ;
+                coe3x1 <= coeff31* x1 ;
+                coe4x0 <= coeff41* x0 ;
+                coe1x1 <= coeff11* x1 ;
+            end
+    
+     reg signed [34:0] xx0_1 ;
+     reg signed [34:0] yy0_1 ;    
+        always@(posedge clk)              // 2^14     4clk
+    //        if ( dp_en )
+            begin
+               xx0_1 <= coe2x0 - coe3x1 ;
+               yy0_1 <= coe1x1 - coe4x0 ;
+            end
+    
+     wire signed [20:0] xx0 ;
+     wire signed [20:0] yy0 ;        
+        assign  xx0 = xx0_1[29:9];            //2^5       4clk
+        assign  yy0 = yy0_1[29:9];
+      
+     wire signed [41:0] fifo_din  ;
+          assign     fifo_din = {xx0 ,yy0} ;
+     wire signed [20:0] xx0_2 ;               // 40 clks
+     wire signed [20:0] yy0_2 ;
+     reg  signed [41:0] fifo_dout ;
+          assign xx0_2 = fifo_dout[41:21];
+          assign yy0_2 = fifo_dout[20:0] ;      
+            
+    reg signed [41:0] shift0 , shift1 , shift2 , shift3 , shift4 ,
+               shift5 , shift6 , shift7 , shift8 , shift9 ,
+               shift10, shift11, shift12, shift13, shift14,
+               shift15, shift16, shift17, shift18, shift19,
+               shift20, shift21, shift22, shift23, shift24,
+               shift25, shift26, shift27, shift28, shift29,
+               shift30, shift31, shift32, shift33, shift34;
+        always@(posedge clk)
+    //        if ( dp_en )
+            begin
+                shift0   <=  fifo_din;    
+                shift1   <=  shift0  ;
+                shift2   <=  shift1  ;    
+                shift3   <=  shift2  ;
+                shift4   <=  shift3  ;
+                shift5   <=  shift4  ;
+                shift6   <=  shift5  ;
+                shift7   <=  shift6  ;
+                shift8   <=  shift7  ;
+                shift9   <=  shift8  ;
+                shift10  <=  shift9  ;
+                shift11  <=  shift10 ;
+                shift12  <=  shift11 ;
+                shift13  <=  shift12 ;
+                shift14  <=  shift13 ;
+                shift15  <=  shift14 ;
+                shift16  <=  shift15 ;
+                shift17  <=  shift16 ;
+                shift18  <=  shift17 ;
+                shift19  <=  shift18 ;
+                shift20  <=  shift19 ;
+                shift21  <=  shift20 ;
+                shift22  <=  shift21 ;
+                shift23  <=  shift22 ;
+                shift24  <=  shift23 ;
+                shift25  <=  shift24 ;
+                shift26  <=  shift25 ;
+                shift27  <=  shift26 ;
+                shift28  <=  shift27 ;
+                shift29  <=  shift28 ;
+                shift30  <=  shift29 ;
+                shift31  <=  shift30 ;
+                shift32  <=  shift31 ;
+                shift33  <=  shift32 ;
+                shift34  <=  shift33 ;
+                //fifo_dout<=  shift34 ;
+				fifo_dout<=  shift0 ;
+            end
+            
+    
+     wire signed [19:0] quotient_1 ;
+          assign quotient_1 = quotient[28:9] ;     // 2^10    40clks 
+     reg signed [40:0] xx1 ;
+     reg signed [40:0] yy1 ;    
+        always@(posedge clk)                       // 2^15    41clks ---2017-7-30
+    //        if ( dp_en )
+            begin
+               xx1 <= xx0_2 * quotient_1 ;
+               yy1 <= yy0_2 * quotient_1 ;
+            end
+    
+     wire signed [12:0]  xx2 ;           //2^0    41clks ---2017-7-30
+     wire signed [12:0]  yy2 ;           //2^0    41clks ---2017-7-30
+          assign  xx2 = xx1[27:15] ;     //---modified 2017-7-26
+          assign  yy2 = yy1[27:15] ;     //---modified 2017-7-26
+    
+     reg signed [12:0] homopixel_o ;     //2^0    42clks ---2017-7-30
+     reg signed [12:0] homoline_o ;      //2^0    42clks ---2017-7-30
+        always@(posedge clk)
+    //        if ( dp_en )
+    //        if (homo_en)
+            begin
+               // if (( xx2 > 0) && (xx2 < 641 ) && (yy2 > 0) && (yy2 < 480))
+                   // begin 
+                   homopixel_o <= xx2 ;
+                   homoline_o  <= yy2 ;        
+                   // end
+               // else
+                   // begin
+                   // homopixel_o <= 11'd0 ;
+                   // homoline_o  <= 11'd0 ;    
+                   // end
+              end                   
+        
+        
+       
+    //------------------------------------------------------------------------------//
+        
+    //   algorithm_fov
+                
+     wire signed [13:0] homopixel_o1;    //2^1   1clk  ---2017-7-30
+     wire signed [13:0] homoline_o1 ;    //2^1   1clk  ---2017-7-30
+          assign  homopixel_o1 = homopixel_o << 1 ;
+          assign  homoline_o1  = homoline_o  << 1 ;
+          
+     reg signed [13:0] x_fish ;          //2^1   1clk  ---2017-7-30
+     reg signed [13:0] y_fish ;          //2^1   1clk  ---2017-7-30
+            always@(posedge clk)
+            // if ( dp_en )
+                begin
+                  x_fish <= homopixel_o1 - VGA_LENGTH_HALF ;   
+                  y_fish <= homoline_o1 - VGA_HEIGHE_HALF;     
+                end
+                
+     reg signed [25:0] x_fish2 ;         //2^2   2clks
+     reg signed [25:0] y_fish2 ;         //2^2   2clks
+           always@(posedge clk)
+               begin
+                  x_fish2 <= x_fish * x_fish ;
+                  y_fish2 <= y_fish * y_fish ;
+               end  
+    
+     // delay 8 clks           
+     reg signed [13:0] x_fishdelay2,x_fishdelay3,x_fishdelay4,x_fishdelay5,
+                       x_fishdelay6,x_fishdelay7,x_fishdelay8,x_fishdelay9,
+                       x_fishdelay10,x_fishdelay11;
+            always @(posedge clk)
+                begin
+                  x_fishdelay2 <= x_fish ;           //2^1   11clks   
+                  x_fishdelay3 <= x_fishdelay2 ;
+                  x_fishdelay4 <= x_fishdelay3 ;
+                  x_fishdelay5 <= x_fishdelay4 ;
+                  x_fishdelay6 <= x_fishdelay5 ;
+                  x_fishdelay7 <= x_fishdelay6 ;
+                  x_fishdelay8 <= x_fishdelay7 ;
+                  x_fishdelay9 <= x_fishdelay8 ;
+                  x_fishdelay10 <= x_fishdelay9 ;
+                  x_fishdelay11 <= x_fishdelay10;
+                end
+                 
+      reg signed [13:0] y_fishdelay2,y_fishdelay3,y_fishdelay4,y_fishdelay5,
+                        y_fishdelay6,y_fishdelay7,y_fishdelay8,y_fishdelay9,
+                        y_fishdelay10,y_fishdelay11;  
+            always @(posedge clk)
+                begin
+                  y_fishdelay2 <= y_fish ;          //2^1   11clks 
+                  y_fishdelay3 <= y_fishdelay2 ;
+                  y_fishdelay4 <= y_fishdelay3 ;
+                  y_fishdelay5 <= y_fishdelay4 ;
+                  y_fishdelay6 <= y_fishdelay5 ;
+                  y_fishdelay7 <= y_fishdelay6 ;
+                  y_fishdelay8 <= y_fishdelay7 ;
+                  y_fishdelay9 <= y_fishdelay8 ;
+                  y_fishdelay10 <= y_fishdelay9 ;
+                  y_fishdelay11 <= y_fishdelay10;
+                end
+                
+     reg signed [25:0] coeff_fish1 ;                //2^2   3clks
+            always@(posedge clk)
+                begin
+                  coeff_fish1 <= x_fish2 + y_fish2 ;
+                end     
+     
+     wire signed [31:0] sqrtin ;
+          assign  sqrtin = {6'b0,coeff_fish1};     // 2^2    3clks
+     wire signed  [15 : 0] sqrtout ;               // 2^1    11clks
+         
+         /* cordic_fishsqrt  sqrt1 (                         // 8 clks    
+           .aclk(clk),                                // input wire aclk
+           .s_axis_cartesian_tvalid(1'b1),            // input wire enable
+           .s_axis_cartesian_tdata(sqrtin),           // input wire [23 : 0]
+          // .m_axis_dout_tvalid(m_axis_dout_tvalid), // output wire out_tvalid
+           .m_axis_dout_tdata(sqrtout)                // output wire [15 : 0] dout_tdata
+         ); */
+		 sqrt	sqrt_inst (
+			.clk ( clk ),
+			.radical ( sqrtin ),
+			.q ( sqrtout ),
+			.remainder ()
+			);
+         
+     wire signed  [15 : 0] divisor_fish;                   // 2^1    11 clks
+               assign  divisor_fish = sqrtout;                  // 400 times
+          
+          wire signed  [23 : 0] dividened_xfish;
+               assign  dividened_xfish = {x_fishdelay2,10'd0};  // 2^10*400   11 clks
+          wire signed  [31 : 0] cos_xfish;                      // 2^10   39clks   
+          wire signed  [14 : 0] cos_xfish1;                     // 2^10   39clks 
+               assign  cos_xfish1 = cos_xfish[14:0];           // 2^10   39clks
+          wire signed  [15:0] remain_cos;
+		  
+          
+          wire signed  [23 : 0] dividened_yfish;
+               assign  dividened_yfish = {y_fishdelay2,10'd0};  // 2^10*400    11 clks  
+          wire signed  [31 : 0] sin_yfish;                      // 2^10   39clks
+          wire signed  [14 : 0] sin_yfish1;                     // 2^10   39clks
+               assign  sin_yfish1 = sin_yfish[14:0];           // 2^10   39clks
+		  wire signed  [15:0] remain_sin;
+                     
+                 /* div_gen_0 div_fish1 (               // 28 clks
+                   .aclk(clk),                                      // input wire aclk
+                   .s_axis_divisor_tvalid(1'b1),          // input wire s_axis_divisor_tvalid
+                   .s_axis_divisor_tdata(divisor_fish),      // input wire [15 : 0] s_axis_divisor_tdata
+                   //.s_axis_dividend_tvalid(s_axis_dividend_tvalid),  // input wire s_axis_dividend_tvalid
+                   .s_axis_dividend_tdata(dividened_xfish),    // input wire [23 : 0] s_axis_dividend_tdata
+                   //.m_axis_dout_tvalid(m_axis_dout_tvalid),          // output wire m_axis_dout_tvalid
+                   .m_axis_dout_tdata(cos_xfish)            // output wire [39 : 0] m_axis_dout_tdata
+                 ); */
+			div_sign	lpm_div_cos (
+				.clock (clk),
+				.denom (  divisor_fish ),//fenmu
+				.numer ( {8'b0,dividened_xfish} ),//fenzi
+				.quotient ( cos_xfish ),
+				.remain ( remain_cos )
+				);
+                 
+                 /* div_gen_0 div_fish2 (               // 28 clks
+                   .aclk(clk),                                      // input wire aclk
+                   .s_axis_divisor_tvalid(1'b1),    // input wire s_axis_divisor_tvalid
+                   .s_axis_divisor_tdata(divisor_fish),      // input wire [15 : 0] s_axis_divisor_tdata
+                   //.s_axis_dividend_tvalid(s_axis_dividend_tvalid),  // input wire s_axis_dividend_tvalid
+                   .s_axis_dividend_tdata(dividened_yfish),    // input wire [23 : 0] s_axis_dividend_tdata
+                   //.m_axis_dout_tvalid(m_axis_dout_tvalid),          // output wire m_axis_dout_tvalid
+                   .m_axis_dout_tdata(sin_yfish)            // output wire [39 : 0] m_axis_dout_tdata
+                 );   */  
+			div_sign	lpm_div_sin (
+				.clock (clk),
+				.denom (  divisor ),//fenmu
+				.numer ( dividend ),//fenzi
+				.quotient ( sin_yfish ),
+				.remain ( remain_sin )
+				);
+                 
+
+             reg signed  [28:0] arctanin1 ;               // 12clks
+             always@(posedge clk)            // 2^9 *2^9     // 2017-8-1
+                 arctanin1 <= FISH_COEFF_W *  sqrtout ;
+                 
+             wire signed [17:0]   arctanin;
+                  assign  arctanin = arctanin1[24:7];    // 2^11  12clks
+             wire signed [17:0]   arctanout;             // 2^11  48clks
+             
+             // 36 clks    arctanin and arctanout enlarge  2^11 times
+             arctan   arctan_yang (             
+             .clk(clk),
+             //.rst(rst),
+             .arctan_i(arctanin),   
+             .arctan_o(arctanout)    
+             );
+             
+          reg signed [31:0]rd_fish ;
+             always@(posedge clk)                          // 2^11   49clks
+                begin
+                   rd_fish <= FISH_COEFF1 * arctanout ;    // 2^11    
+                end
+                
+             wire signed [15:0]rd_fish1 ;
+             assign rd_fish1 = rd_fish[20:5];              // 2^6    49clks 2016-8-1
+             
+         reg signed [14:0] cosdly1,cosdly2,cosdly3,cosdly4,cosdly5,
+                           cosdly6,cosdly7,cosdly8,cosdly9,cosdly10;
+             always@(posedge clk)
+                 begin
+                     cosdly1  <= cos_xfish1 ;
+                     cosdly2  <= cosdly1 ;
+                     cosdly3  <= cosdly2 ;
+                     cosdly4  <= cosdly3 ;
+                     cosdly5  <= cosdly4 ;
+                     cosdly6  <= cosdly5 ;
+                     cosdly7  <= cosdly6 ;
+                     cosdly8  <= cosdly7 ;
+                     cosdly9  <= cosdly8 ;
+                     cosdly10 <= cosdly9 ;           // 2^10 49clks
+                 end
+                 
+         reg signed [14:0] sindly1,sindly2,sindly3,sindly4,sindly5,
+                           sindly6,sindly7,sindly8,sindly9,sindly10;
+             always@(posedge clk)
+                 begin
+                     sindly1  <= sin_yfish1 ;
+                     sindly2  <= sindly1 ;
+                     sindly3  <= sindly2 ;
+                     sindly4  <= sindly3 ;
+                     sindly5  <= sindly4 ;
+                     sindly6  <= sindly5 ;
+                     sindly7  <= sindly6 ;
+                     sindly8  <= sindly7 ;
+                     sindly9  <= sindly8 ;
+                     sindly10 <= sindly9 ;            // 2^10 49clks
+                 end
+         
+         reg signed [32:0]    u1_fish,v1_fish;        // 2^16    50clks
+             always@(posedge clk)
+                begin
+                   u1_fish <= rd_fish1 * cosdly1 ;
+                   v1_fish <= rd_fish1 * sindly1 ;  // 2^10 * 2^6
+                end  
+         wire signed [11:0]    u2_fish,v2_fish;       // 2^1   50clks
+             assign     u2_fish = u1_fish[26:15] ;
+             assign     v2_fish = v1_fish[26:15] ;
+             
+             reg signed [11:0]    xx_fish ;     
+             reg signed [11:0]    yy_fish ;
+             always@(posedge clk)                     // 2^1   51clks
+                 begin        
+                 xx_fish <= u2_fish + VGA_LENGTH_HALF ;
+                 yy_fish <= v2_fish + VGA_HEIGHE_HALF ;
+                 end
+    
+            wire signed [10:0] xfish_final,yfish_final;
+            assign xfish_final = xx_fish[11:1];
+            assign yfish_final = yy_fish[11:1];
+ 
+reg signed [10:0] xxx_fish ;
+ reg signed [10:0] yyy_fish ;
+         always@(posedge clk)           
+                begin        
+                xxx_fish <= xfish_final -80 ;
+                yyy_fish  <= yfish_final -80 ;
+                end
+
+    wire signed [10:0] xx_cnt;
+    wire signed [10:0]yy_cnt; 
+    
+    assign xx_cnt = xxx_fish;   
+    assign yy_cnt = yyy_fish;
+    
+    parameter four_down = 8'd5;
+    parameter three_right = 8'd8;
+wire signed [10:0] xxx_cnt;
+wire signed [10:0]yyy_cnt;
+wire [16:0]addr_rd;
+assign xxx_cnt= ((xx_cnt>0)&&( xx_cnt<481))? xx_cnt : 0;
+assign yyy_cnt= ((yy_cnt>0)&&( yy_cnt<321))? yy_cnt  : 0;
+assign addr_rd =(( xxx_cnt==0 ) || ( yyy_cnt==0) )? 0: 480*yyy_cnt+xxx_cnt;  
+
+assign addr_rd_select = addr_rd>>1;
+
+  
+endmodule

@@ -1,0 +1,160 @@
+`timescale 1ns / 1ps
+//////////////////////////////////////////////////////////////////////////////////
+// Module Name:    hdmi_disp
+//
+//////////////////////////////////////////////////////////////////////////////////
+module hdmi_display 
+  (
+		  input           hdmi_clk_i,
+	      input           hdmi_rst, 	
+	      input [11:0]    ddr_data,        //DDR中的图像数据
+          input [7:0]     number_delay	,	  
+	      
+
+          output          hdmi_clk,
+          output          hdmi_en,
+		  output          hdmi_hsync,
+		  output          hdmi_vsync,
+		  output [11:0]   hdmi_data,
+		
+		  output   reg[10 : 0] x_cnt,
+          output   reg[10 : 0]  y_cnt
+    );
+  
+//-----------------------------------------------------------//
+    // 水平扫描参数的设定640*480 hdmi 60FPS_25MHz
+    //-----------------------------------------------------------//
+    parameter LinePeriod =800;            //行周期数
+    parameter H_SyncPulse=96;             //行同步脉冲（Sync a）
+    parameter H_BackPorch=48 ;            //显示后沿（Back porch b）
+    parameter H_ActivePix=640;            //显示时序段（Display interval c）
+    parameter H_FrontPorch=16;            //显示前沿（Front porch d）
+    
+    parameter Hde_start=144;
+    parameter Hde_end=784;
+    //-----------------------------------------------------------//
+    // 垂直扫描参数的设定640*480 hdmi
+    //-----------------------------------------------------------//
+    parameter FramePeriod =525;           //列周期数
+    parameter V_SyncPulse=2;              //列同步脉冲（Sync o）
+    parameter V_BackPorch=33 ;             //显示后沿（Back porch p）
+    parameter V_ActivePix=480;            //显示时序段（Display interval q）
+    parameter V_FrontPorch=10;             //显示前沿（Front porch r）
+    
+    parameter Vde_start=35;
+    parameter Vde_end=515;
+
+  reg[3 : 0] hdmi_r_reg;
+  reg[3 : 0] hdmi_g_reg;
+  reg[3 : 0] hdmi_b_reg;  
+
+  
+  reg hsync_r;
+  reg vsync_r; 
+  reg vsync_de;
+  reg hsync_de;
+ 
+  reg [11:0] ddr_data_reg;               //ddr的输入数据存储
+   
+		  
+
+
+//----------------------------------------------------------------
+////////// 水平扫描计数
+//----------------------------------------------------------------
+always @ (posedge hdmi_clk_i)
+       if(hdmi_rst)    x_cnt <= 1;
+       else if(x_cnt == LinePeriod) x_cnt <= 1;
+       else x_cnt <= x_cnt+ 1'b1;
+		 
+//----------------------------------------------------------------
+////////// 水平扫描信号hsync,hsync_de产生
+//----------------------------------------------------------------
+wire [10:0] hsync_de_start;
+wire [10:0] hsync_de_end;
+assign hsync_de_start = Hde_start + number_delay;
+assign hsync_de_end = ((Hde_end + number_delay) < LinePeriod) ? Hde_end + number_delay  : Hde_end + number_delay - LinePeriod;
+
+always @ (posedge hdmi_clk_i)
+   begin
+       if(hdmi_rst) hsync_r <= 1'b1;
+       else if(x_cnt == 1'b1 + number_delay) hsync_r <= 1'b0;             //产生hsync信号
+       else if(x_cnt == H_SyncPulse + number_delay) hsync_r <= 1'b1;
+		 
+		 		 
+	    if(1'b0) hsync_de <= 1'b0;
+       else if(x_cnt == hsync_de_start) hsync_de <= 1'b1;    //产生hsync_de信号
+       else if(x_cnt == hsync_de_end) hsync_de <= 1'b0;					 
+ 
+	end
+//----------------------------------------------------------------
+////////// 垂直扫描计数
+//----------------------------------------------------------------
+always @ (posedge hdmi_clk_i)
+       if(hdmi_rst) y_cnt <= 1;
+       else if(y_cnt == FramePeriod) y_cnt <= 1;
+       else if(x_cnt == LinePeriod) y_cnt <= y_cnt+1'b1;
+
+	
+//----------------------------------------------------------------
+////////// 垂直扫描信号vsync, vsync_de产生
+//----------------------------------------------------------------
+
+always @ (posedge hdmi_clk_i)
+  begin
+       if(1'b0) vsync_r <= 1'b1;
+       else if(y_cnt == 1) vsync_r <= 1'b0;    //产生vsync信号
+       else if(y_cnt == V_SyncPulse) vsync_r <= 1'b1;
+		 
+	    if(1'b0) vsync_de <= 1'b0;
+       else if(y_cnt == Vde_start) vsync_de <= 1'b1;    //产生vsync_de信号
+       else if(y_cnt == Vde_end) vsync_de <= 1'b0;	 
+  end
+		 
+
+
+//----------------------------------------------------------------
+////////// ddr读请求信号产生程序	,256bit的DDR数据转成16个像素输出
+//---------------------------------------------------------------- 
+/* reg  count_hdmi; // shuchu dizhi jishu
+ always @(negedge hdmi_clk_i)
+ begin
+   if (hdmi_rst) begin
+		 ddr_data_reg<=11'd0;
+		 hdmi_r_reg<=4'd0;
+		 hdmi_g_reg<=4'd0;
+		 hdmi_b_reg<=4'd0; 
+		 count_hdmi<= 1'b0;
+		 
+   end
+   else begin
+	  if (hsync_de && vsync_de ) begin             //如果hdmi输出有效的图像数据
+              hdmi_b_reg<=ddr_data_reg[11:8];          
+              hdmi_g_reg<=ddr_data_reg[7:4];
+              hdmi_r_reg<=ddr_data_reg[3:0];    
+              ddr_data_reg<=ddr_data;                   //ddr数据改变     
+              count_hdmi <= count_hdmi + 1'b1;                
+              end                    	 
+	  else begin
+			hdmi_r_reg<=4'd0;                    
+            hdmi_g_reg<=4'd0;
+            hdmi_b_reg<=4'd0;
+			ddr_data_reg<=ddr_data;                     //ddr数据改变
+			count_hdmi <= 1'b0;
+	  end
+	end
+end */
+
+ 
+               
+        
+  assign hdmi_clk = hdmi_clk_i;
+  assign hdmi_en = hsync_de & vsync_de;
+  assign hdmi_hsync = hsync_r;
+  assign hdmi_vsync = vsync_r;  
+  
+  assign hdmi_data = ddr_data;
+  
+
+
+endmodule
